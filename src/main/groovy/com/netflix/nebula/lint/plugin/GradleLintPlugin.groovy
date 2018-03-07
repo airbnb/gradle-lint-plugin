@@ -17,8 +17,6 @@ package com.netflix.nebula.lint.plugin
 
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.plugins.JavaBasePlugin
-import org.gradle.api.tasks.compile.AbstractCompile
 
 class GradleLintPlugin implements Plugin<Project> {
     private final exemptTasks = ['help', 'tasks', 'dependencies', 'dependencyInsight',
@@ -76,14 +74,6 @@ class GradleLintPlugin implements Plugin<Project> {
         // ensure that lint runs
         project.afterEvaluate {
             project.tasks.each { finalizeByLint(it) }
-        }
-
-        project.plugins.withType(JavaBasePlugin) {
-            project.tasks.withType(AbstractCompile) { task ->
-                project.rootProject.tasks.getByName('fixGradleLint').dependsOn(task)
-                project.rootProject.tasks.getByName('lintGradle').dependsOn(task)
-                project.rootProject.tasks.getByName('fixLintGradle').dependsOn(task)
-            }
         }
     }
 
