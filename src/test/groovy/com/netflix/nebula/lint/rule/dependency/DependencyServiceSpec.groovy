@@ -2,7 +2,6 @@ package com.netflix.nebula.lint.rule.dependency
 
 import com.netflix.nebula.lint.TestKitSpecification
 import org.gradle.api.Project
-import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
 import org.gradle.api.internal.artifacts.DefaultResolvedDependency
 import org.gradle.testfixtures.ProjectBuilder
 import spock.lang.Issue
@@ -83,10 +82,13 @@ class DependencyServiceSpec extends TestKitSpecification {
 
             // a task to generate an unused dependency report for each configuration
             project.configurations.collect { it.name }.each { conf ->
-                task "\${conf}Unused"(dependsOn: compileTestJava) << {
-                  new File(projectDir, "\${conf}Unused.txt").text = DependencyService.forProject(project)
-                    .unusedDependencies(conf)
-                    .join('\\n')
+                task "\${conf}Unused"(dependsOn: compileTestJava) {
+                    doLast {
+                        new File(projectDir, "\${conf}Unused.txt").text = DependencyService.forProject(project)
+                        .unusedDependencies(conf)
+                        .join('\\n')
+                    }
+                  
                 }
             }
             """.stripMargin()
@@ -130,10 +132,12 @@ class DependencyServiceSpec extends TestKitSpecification {
 
             // a task to generate an undeclared dependency report for each configuration
             project.configurations.collect { it.name }.each { conf ->
-                task "\${conf}Undeclared"(dependsOn: compileTestJava) << {
-                  new File(projectDir, "\${conf}Undeclared.txt").text = DependencyService.forProject(project)
-                    .undeclaredDependencies(conf)
-                    .join('\\n')
+                task "\${conf}Undeclared"(dependsOn: compileTestJava) {
+                    doLast {
+                         new File(projectDir, "\${conf}Undeclared.txt").text = DependencyService.forProject(project)
+                        .undeclaredDependencies(conf)
+                        .join('\\n')
+                    }
                 }
             }
             """.stripMargin()
@@ -196,16 +200,20 @@ class DependencyServiceSpec extends TestKitSpecification {
 
             plugins {
                 id 'java'
-                id 'nebula.integtest' version '3.2.1'
+                id 'nebula.integtest' version '5.1.2'
                 id 'nebula.lint'
             }
             
-            task compileSourceSetOutput << {
-                println('@@' + DependencyService.forProject(project).sourceSetByConf('compile').output.classesDir)
+            task compileSourceSetOutput {
+                doLast {
+                  println('@@' + DependencyService.forProject(project).sourceSetByConf('compile').java.outputDir)
+                }
             }
             
-            task integTestSourceSetOutput << {
-                println('@@' + DependencyService.forProject(project).sourceSetByConf('integTestCompile').output.classesDir)
+            task integTestSourceSetOutput  {
+                doLast {
+                   println('@@' + DependencyService.forProject(project).sourceSetByConf('integTestCompile').java.outputDir)
+                }
             }
         """
 
@@ -267,11 +275,13 @@ class DependencyServiceSpec extends TestKitSpecification {
                 compile project(':core')
             }
 
-            task coreContents << {
-              new File(projectDir, "coreContents.txt").text = DependencyService.forProject(project)
-                .jarContents(configurations.compile.resolvedConfiguration.firstLevelModuleDependencies[0].module.id.module)
-                .classes
-                .join('\\n')
+            task coreContents {
+                doLast {
+                    new File(projectDir, "coreContents.txt").text = DependencyService.forProject(project)
+                    .jarContents(configurations.compile.resolvedConfiguration.firstLevelModuleDependencies[0].module.id.module)
+                    .classes
+                    .join('\\n')
+                }
             }
         """
 
@@ -288,5 +298,84 @@ class DependencyServiceSpec extends TestKitSpecification {
         tasks                                   | contents
         ['web:coreContents']                    | []
         ['web:assemble', 'web:coreContents']    | ['A']
+    }
+
+    def 'resolved configurations returns lists of configurations that are resolvable and resolved'() {
+        given:
+        definePluginOutsideOfPluginBlock = true
+        def dependency = 'commons-lang:commons-lang:latest.release'
+
+        buildFile << """
+            apply plugin: 'java-library'
+
+            repositories { jcenter() }
+
+            dependencies {
+                compile '${dependency}'
+                compileOnly '${dependency}'
+                testCompile '${dependency}'
+                testCompileOnly '${dependency}'
+
+                implementation '${dependency}'
+                testImplementation '${dependency}'
+
+                apiElements '${dependency}'
+
+                runtimeElements '${dependency}'
+
+                runtime '${dependency}'
+                testRuntime '${dependency}'
+
+                runtimeOnly '${dependency}'
+                testRuntimeOnly '${dependency}'
+            }
+            
+            import com.netflix.nebula.lint.rule.dependency.*
+            
+            task resolvableAndResolvedConfigurations {
+                doLast {
+                    new File(projectDir, "resolvableAndResolvedConfigurations.txt").text = DependencyService.forProject(project)
+                    .resolvableAndResolvedConfigurations()
+                    .join('\\n')
+                }
+            }
+            """.stripIndent()
+
+        createJavaSourceFile('public class Main {}')
+        createJavaTestFile('public class TestMain {}')
+
+        def dependencyService = DependencyService.forProject(project)
+        dependencyService.resolvableConfigurations().each { resolvableConf ->
+            resolvableConf.resolve()
+        }
+
+        when:
+        def resolvedConfigurations = dependencyService.resolvableAndResolvedConfigurations()
+
+        then:
+        def configurationNames = resolvedConfigurations.collect { conf -> conf.getName() }
+
+        configurationNames.size() > 0
+
+        // sample the configurations
+        configurationNames.contains('compile')
+        configurationNames.contains('testCompile')
+
+        !configurationNames.contains('implementation')
+        !configurationNames.contains('testImplementation')
+
+        !configurationNames.contains('compileOnly')
+        !configurationNames.contains('testCompileOnly')
+
+        !configurationNames.contains('apiElements')
+        !configurationNames.contains('runtimeElements')
+
+        configurationNames.contains('runtime')
+        configurationNames.contains('testRuntime')
+
+        !configurationNames.contains('runtimeOnly')
+        !configurationNames.contains('testRuntimeOnly')
+
+        // and more!
     }
 }

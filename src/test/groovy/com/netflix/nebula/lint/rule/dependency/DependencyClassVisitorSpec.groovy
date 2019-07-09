@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Netflix, Inc.
+ * Copyright 2015-2019 Netflix, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -257,6 +257,6 @@ class DependencyClassVisitorSpec extends Specification {
     static DefaultResolvedDependency gav(String g, String a, String v) {
         def mvid = new DefaultModuleVersionIdentifier(g, a, v)
         def id = new ResolvedConfigurationIdentifier(mvid, 'compile')
-        new DefaultResolvedDependency(0, id, null)
+        new DefaultResolvedDependency(id, null)
     }
 }

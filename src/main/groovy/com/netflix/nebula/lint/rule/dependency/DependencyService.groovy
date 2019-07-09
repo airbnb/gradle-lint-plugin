@@ -7,11 +7,9 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.*
 import org.gradle.api.file.FileCollection
 import org.gradle.api.internal.artifacts.DefaultModuleIdentifier
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.VersionInfo
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.Versioned
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.DefaultVersionComparator
 import org.gradle.api.plugins.JavaPluginConvention
 import org.gradle.api.tasks.SourceSet
+import org.gradle.util.VersionNumber
 import org.objectweb.asm.ClassReader
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -27,8 +25,7 @@ import java.util.zip.ZipException
 
 class DependencyService {
     private static final String EXTENSION_NAME = "gradleLintDependencyService"
-
-    private static final Comparator<Versioned> VERSION_COMPARATOR = new DefaultVersionComparator()
+    private static final Collection<String> DEFAULT_METHOD_REFERENCE_IGNORED_PACKAGES = ["java/lang", "java/util", "java/net", "java/io", "java/nio", "java/swing"] //ignore java packages by default for method references
 
     static synchronized DependencyService forProject(Project project) {
         def extension = project.extensions.findByType(DependencyServiceExtension)
@@ -124,6 +121,15 @@ class DependencyService {
         return project.configurations.findAll { isResolvable(it) }
     }
 
+    /**
+     * Projects previously using {@link #resolvableConfigurations()} or
+     * checking configurations individually with {@link #isResolved()}
+     * will likely want to use this method
+     */
+    Set<Configuration> resolvableAndResolvedConfigurations() {
+        return resolvableConfigurations().findAll { isResolved(it) }
+    }
+
     @SuppressWarnings("GrMethodMayBeStatic") // Static memoization will leak
     @Memoized
     JarContents jarContents(File file) {
@@ -154,8 +160,62 @@ class DependencyService {
             else if (m1.name != m2.name)
                 return m1.name.compareTo(m2.name)
             else
-                return VERSION_COMPARATOR.compare(new VersionInfo(m2.version), new VersionInfo(m1.version))
+                return VersionNumber.parse(m2.version).compareTo(VersionNumber.parse(m1.version))
         }
+    }
+
+    /**
+     * Returns method references for all classes on a given configuration.
+     * This doesn't ignore packages at all.
+     * @param confName
+     * @return
+     */
+    @Memoized
+    Collection<ClassInformation> methodReferences(String confName) {
+        return findMethodReferences(confName, Collections.EMPTY_LIST,  Collections.EMPTY_LIST)
+    }
+
+    /**
+     * Returns method references for all classes on a given configuration
+     * By default, ignores common java package references. Example: class: Main | methodName: <init> | owner: java/lang/Object | methodDesc: ()V
+     * Custom ignored packages can be provided. The check is done for packages that startWith the given values.
+     * @param confName
+     * @param ignoredPackages
+     * @return
+     */
+    @Memoized
+    Collection<ClassInformation> methodReferencesExcluding(String confName,  Collection<String> ignoredPackages = []) {
+        return findMethodReferences(confName, Collections.EMPTY_LIST,  ignoredPackages + DEFAULT_METHOD_REFERENCE_IGNORED_PACKAGES)
+    }
+
+    /**
+     * Returns method references for all classes on a given configuration
+     * By default, ignores common java package references. Example: class: Main | methodName: <init> | owner: java/lang/Object | methodDesc: ()V
+     * @param confName
+     * @param includeOnlyPackages
+     * @return
+     */
+    @Memoized
+    Collection<ClassInformation> methodReferencesIncludeOnly(String confName, Collection<String> includeOnlyPackages) {
+        return findMethodReferences(confName, includeOnlyPackages,  Collections.EMPTY_LIST)
+    }
+
+    private Collection<ClassInformation> findMethodReferences(String confName, Collection<String> includeOnlyPackages, Collection<String> ignoredPackages ) {
+        Map<String, Collection<ResolvedArtifact>> artifactsByClass = artifactsByClass(confName)
+        Collection<ClassInformation> classesInfo = []
+        sourceSetOutput(confName).files.findAll { it.exists() }.each { output ->
+            Files.walkFileTree(output.toPath(), new SimpleFileVisitor<Path>() {
+                @Override
+                FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    if (file.toFile().name.endsWith('.class')) {
+                        ClassInformation classInformation = new MethodScanner().findMethodReferences(artifactsByClass, file, includeOnlyPackages, ignoredPackages)
+                        classesInfo.add(classInformation)
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+            })
+        }
+        return classesInfo
     }
 
     @Memoized
@@ -192,7 +252,6 @@ class DependencyService {
                 }
             })
         }
-
         return references
     }
 
@@ -207,7 +266,7 @@ class DependencyService {
                 .groupBy { it.module }
                 .values()
                 .collect {
-            it.sort { d1, d2 -> VERSION_COMPARATOR.compare(new VersionInfo(d2.version), new VersionInfo(d1.version)) }.first()
+            it.sort { d1, d2 -> VersionNumber.parse(d2.version).compareTo(VersionNumber.parse(d1.version)) }.first()
         }
         .toSet()
 
@@ -377,7 +436,9 @@ class DependencyService {
     boolean isResolvable(Configuration conf) {
         // isCanBeResolved was added in Gradle 3.3. Previously, all configurations were resolvable
         if (Configuration.class.declaredMethods.any { it.name == 'isCanBeResolved' }) {
-            return conf.canBeResolved
+            //compileOnly and its flavors are marked as resolvable but only for backward compatibility purposes
+            //in reality they shouldn't be
+            return conf.canBeResolved && !conf.name.toLowerCase().endsWith("compileonly")
         }
         return true
     }
@@ -440,5 +501,23 @@ class DependencyService {
 
         def androidReleaseOutput = project.tasks.findByName('compileReleaseJavaWithJavac')?.destinationDir
         return androidReleaseOutput
+    }
+
+    Comparator<? super SourceSet> sourceSetComparator() {
+        // sort the sourceSets from least dependent to most dependent, e.g. [main, test, integTest]
+        new Comparator<SourceSet>() {
+            @Override
+            int compare(SourceSet s1, SourceSet s2) {
+                def c1 = project.configurations.findByName(s1.compileConfigurationName)
+                def c2 = project.configurations.findByName(s2.compileConfigurationName)
+
+                if (allExtendsFrom(c1).contains(c2))
+                    1
+                if (allExtendsFrom(c2).contains(c1))
+                    -1
+                // secondary sorting if there is no relationship between these source sets
+                else c1.name <=> c2.name
+            }
+        }
     }
 }

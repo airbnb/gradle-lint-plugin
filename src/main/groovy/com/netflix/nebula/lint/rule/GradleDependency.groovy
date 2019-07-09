@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Netflix, Inc.
+ * Copyright 2015-2019 Netflix, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,7 +71,7 @@ class GradleDependency implements Cloneable {
     }
 
     static GradleDependency fromConstant(Object expr) {
-        def matcher = expr =~ /(?<group>[^:]+)?(:(?<name>[^:]+))(:(?<version>[^@:]+)(?<classifier>:[^@]+)?(?<ext>@.+)?)?/
+        def matcher = expr =~ /(?<group>[^:]+)?(:(?<name>[^:]+))(:(?<version>[^@:]+)?(?<classifier>:[^@]+)?(?<ext>@.+)?)?/
         if (matcher.matches()) {
             return new GradleDependency(
                     matcher.group('group'),

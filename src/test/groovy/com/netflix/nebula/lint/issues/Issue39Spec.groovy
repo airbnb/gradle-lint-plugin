@@ -8,7 +8,7 @@ class Issue39Spec extends TestKitSpecification {
         buildFile.text = """
             plugins {
                 id 'nebula.lint'
-                id 'nebula.integtest' version '3.2.1'
+                id 'nebula.integtest' version '5.1.2'
                 id 'java'
             }
 
@@ -19,8 +19,7 @@ class Issue39Spec extends TestKitSpecification {
             repositories { mavenCentral() }
 
             dependencies {
-                // guava is a transitive dependency
-                compile 'com.netflix.servo:servo-atlas:0.12.7'
+                compile group: 'com.google.guava', name: 'guava', version: '26.0-jre'
             }
         """
 

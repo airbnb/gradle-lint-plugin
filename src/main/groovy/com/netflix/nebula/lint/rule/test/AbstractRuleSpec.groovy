@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Netflix, Inc.
+ * Copyright 2015-2019 Netflix, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package com.netflix.nebula.lint.rule.test
 import com.netflix.nebula.lint.GradleLintFix
 import com.netflix.nebula.lint.GradleLintPatchAction
 import com.netflix.nebula.lint.plugin.NotNecessarilyGitRepository
+import com.netflix.nebula.lint.rule.BuildFiles
 import com.netflix.nebula.lint.rule.GradleLintRule
 import com.netflix.nebula.lint.rule.GradleModelAware
 import nebula.test.ProjectSpec
@@ -48,14 +49,22 @@ abstract class AbstractRuleSpec extends ProjectSpec {
         ruleSet
     }
 
+    private GradleLintRule[] configureBuildFile(GradleLintRule... rules) {
+        rules.each {
+            it.buildFiles = new BuildFiles([project.buildFile])
+        }
+        rules
+    }
+
     Results runRulesAgainst(GradleLintRule... rules) {
-        new StringSourceAnalyzer(project.buildFile.text).analyze(configureRuleSet(rules))
+        new StringSourceAnalyzer(project.buildFile.text).analyze(configureRuleSet(configureBuildFile(rules)))
     }
 
     String correct(GradleLintRule... rules) {
         def analyzer = new StringSourceAnalyzer(project.buildFile.text)
+        def rulesWithBuildFile = configureBuildFile(rules)
         def violations = analyzer
-                .analyze(configureRuleSet(*rules.collect { it.buildFile = project.buildFile; it }))
+                .analyze(configureRuleSet(*rulesWithBuildFile.collect { it.buildFiles.original(null).file = project.buildFile; it }))
                 .violations
 
         def patchFile = new File(projectDir, 'lint.patch')

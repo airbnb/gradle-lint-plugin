@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 Netflix, Inc.
+ * Copyright 2015-2019 Netflix, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,8 @@ import org.gradle.api.tasks.Nested
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.VerificationTask
 import org.gradle.internal.reflect.Instantiator
+import org.gradle.util.DeprecationLogger
+
 import static com.netflix.nebula.lint.StyledTextService.Styling.*
 
 import javax.inject.Inject
@@ -47,7 +49,11 @@ class GradleLintReportTask extends DefaultTask implements VerificationTask, Repo
     boolean ignoreFailures
 
     GradleLintReportTask() {
-        reports = instantiator.newInstance(CodeNarcReportsImpl, this)
+        CodeNarcReportsImpl codeNarcReports
+        DeprecationLogger.whileDisabled() {
+            codeNarcReports = instantiator.newInstance(CodeNarcReportsImpl, this)
+        }
+        reports = codeNarcReports
         outputs.upToDateWhen { false }
         group = 'lint'
     }
@@ -56,7 +62,7 @@ class GradleLintReportTask extends DefaultTask implements VerificationTask, Repo
     void generateReport() {
         if (reports.enabled) {
             def lintService = new LintService()
-            def results = lintService.lint(project)
+            def results = lintService.lint(project, false)
             def violationCount = results.violations.size()
             def textOutput = new StyledTextService(getServices())
 
@@ -81,6 +87,7 @@ class GradleLintReportTask extends DefaultTask implements VerificationTask, Repo
                 throw new GradleException("This build contains $errors critical lint violation${errors == 1 ? '' : 's'}")
             }
         }
+
     }
 
     @Inject

@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 Netflix, Inc.
+ * Copyright 2015-2019 Netflix, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.netflix.nebula.lint.*
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.TaskAction
+import org.gradle.util.DeprecationLogger
 
 import static com.netflix.nebula.lint.StyledTextService.Styling.*
 
@@ -26,6 +27,7 @@ class LintGradleTask extends DefaultTask {
     List<GradleLintViolationAction> listeners = []
 
     boolean failOnWarning = false
+    boolean onlyCriticalRules = false
 
     LintGradleTask() {
         group = 'lint'
@@ -33,12 +35,13 @@ class LintGradleTask extends DefaultTask {
 
     @TaskAction
     void lint() {
-        def violations = new LintService().lint(project).violations
+        def violations = new LintService().lint(project, onlyCriticalRules).violations
                 .unique { v1, v2 -> v1.is(v2) ? 0 : 1 }
 
         (listeners + new GradleLintPatchAction(project) + new GradleLintInfoBrokerAction(project) + consoleOutputAction).each {
             it.lintFinished(violations)
         }
+
     }
 
     final def consoleOutputAction = new GradleLintViolationAction() {
@@ -62,9 +65,9 @@ class LintGradleTask extends DefaultTask {
             }
 
             violations.groupBy { it.file }.each { buildFile, violationsByFile ->
-                String buildFilePath = project.rootDir.toURI().relativize(buildFile.toURI()).toString()
 
                 violationsByFile.each { v ->
+                    String buildFilePath = project.rootDir.toURI().relativize(v.file.toURI()).toString()
                     if (v.rule.priority == 1) {
                         textOutput.withStyle(Red).text('error'.padRight(10))
                     } else {
@@ -79,10 +82,12 @@ class LintGradleTask extends DefaultTask {
                     }
                     textOutput.println()
 
-                    if (v.lineNumber)
+                    if (v.lineNumber) {
                         textOutput.withStyle(Bold).println(buildFilePath + ':' + v.lineNumber)
-                    if (v.sourceLine)
+                    }
+                    if (v.sourceLine) {
                         textOutput.println("$v.sourceLine")
+                    }
 
                     textOutput.println() // extra space between violations
                 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2017 Netflix, Inc.
+ * Copyright 2015-2019 Netflix, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.netflix.nebula.lint.rule.dependency
 
 import com.netflix.nebula.lint.TestKitSpecification
-import spock.lang.Ignore
 import spock.lang.Issue
 import spock.lang.Unroll
 
@@ -63,6 +62,7 @@ class UnusedDependencyRuleSpec extends TestKitSpecification {
 
         then:
         runTasksSuccessfully('compileJava', 'fixGradleLint')
+
         dependencies(buildFile) == expected
 
         where:
@@ -468,31 +468,6 @@ class UnusedDependencyRuleSpec extends TestKitSpecification {
         !results.output.contains('unused-dependency')
     }
 
-    @Issue('46')
-    def 'remove unused compileOnly dependencies'() {
-        when:
-        buildFile.text = """
-            plugins {
-                id 'nebula.lint'
-                id 'war'
-            }
-
-            gradleLint.rules = ['unused-dependency']
-
-            repositories { mavenCentral() }
-
-            dependencies {
-                compileOnly 'com.google.guava:guava:19.0'
-            }
-        """
-
-        createJavaSourceFile('public class A {}')
-
-        then:
-        def results = runTasksSuccessfully('compileJava')
-        results.output.contains('unused-dependency')
-    }
-
     @Issue('53')
     def 'only one violation reported when a dependency is unused by multiple configurations'() {
         when:
@@ -500,7 +475,7 @@ class UnusedDependencyRuleSpec extends TestKitSpecification {
             plugins {
                 id 'nebula.lint'
                 id 'java'
-                id 'nebula.integtest' version '3.3.0'
+                id 'nebula.integtest' version '5.1.2'
             }
             
             repositories { mavenCentral() }
@@ -554,5 +529,38 @@ class UnusedDependencyRuleSpec extends TestKitSpecification {
         def results = runTasksSuccessfully('classes', 'testClasses')
         println(results.output)
         results.output.readLines().count { it.contains('unused-dependency') } == 1
+    }
+
+    @Unroll
+    def 'ignore configurations from java library plugin'() {
+        when:
+        buildFile.text = """\
+            |plugins {
+            |    id 'nebula.lint'
+            |    id 'java-library'
+            |}
+            |
+            |gradleLint.rules = ['unused-dependency']
+            |
+            |repositories { mavenCentral() }
+            |
+            |dependencies {
+            ${deps.collect { "|   implementation '$it'" }.join('\n')}
+            |}
+            |""".stripMargin()
+
+        createJavaSourceFile(main)
+
+        then:
+        runTasksSuccessfully('compileJava', 'fixGradleLint')
+
+        buildFile.text.contains("compile '${guava}'")
+        buildFile.text.contains('implementation')
+
+        where:
+        deps               | expected
+        [guava, asm]       | [guava]
+        [springfox]        | [guava]
+        [guava, springfox] | [guava]
     }
 }
